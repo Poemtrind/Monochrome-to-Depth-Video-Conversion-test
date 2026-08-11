@@ -58,18 +58,37 @@ window.addEventListener('unhandledrejection', (e) => {
   setStatus(msg);
 });
 
-// WebGPU 提示
-if (!('gpu' in navigator)) {
-  deviceWarn.textContent = '提示：当前环境未启用 WebGPU，已将设备自动切到 WASM（更稳）。';
+// 环境提示：WebGPU 不可用时自动选 WASM。
+// 注意：WASM 单线程（numThreads=1）不依赖跨源隔离安全头（COOP/COEP），
+// 任何手机/桌面浏览器都能直接跑，所以“缺安全头”不是错误，只是少了多线程加速。
+if (!supportsWebGPU()) {
+  deviceWarn.textContent = '提示：当前浏览器未启用 WebGPU，已自动选用 WASM（单线程，所有浏览器均可流畅运行）。';
   deviceSelect.value = 'wasm';
 }
 
-// 移动端视图判定与自动设备选择（与 CSS 720px 断点一致）
+// 移动端视图判定（与 CSS 720px 断点一致）
 function isMobileView() {
   return window.matchMedia('(max-width: 720px)').matches;
 }
-function autoDevice() {
-  return ('gpu' in navigator) ? 'webgpu' : 'wasm';
+function supportsWebGPU() {
+  try {
+    return 'gpu' in navigator && navigator.gpu != null;
+  } catch (_) { return false; }
+}
+// 是否支持 WASM 多线程（需要跨源隔离 COOP/COEP 安全头）。
+// 注意：单线程 WASM 任何时候都能跑，不依赖安全头。本应用默认跑单线程，
+// 所以这个标志只用于“能否额外多线程加速”，绝不作为“能不能用”的门槛。
+function supportsWasmThreads() {
+  try {
+    return typeof SharedArrayBuffer !== 'undefined' && self.crossOriginIsolated === true;
+  } catch (_) { return false; }
+}
+// 选设备：
+//  - 手机端一律 WASM（单线程，最稳、所有浏览器可用；手机 WebGPU 支持差也不强求）
+//  - 桌面端尊重下拉框选择（WebGPU 优先，加载失败会自动降级 WASM）
+function chooseDevice() {
+  if (isMobileView()) return 'wasm';
+  return deviceSelect.value || (supportsWebGPU() ? 'webgpu' : 'wasm');
 }
 
 // ---------- 工具 ----------
@@ -183,37 +202,38 @@ function onModelProgress(p) {
 }
 
 loadModelBtn.addEventListener('click', async () => {
-  // 手机端不显示设备选择框，自动判定（有 WebGPU 用 WebGPU，否则 WASM）
-  const device = isMobileView() ? autoDevice() : deviceSelect.value;
-  if (device === 'webgpu' && !('gpu' in navigator)) {
-    const msg = '当前浏览器或系统未启用 WebGPU，请切换到 WASM 后再试。';
-    setStatus(msg);
-    alert(msg);
-    return;
+  // 选设备：手机端强制 WASM（单线程）；桌面端用下拉框所选（WebGPU 失败自动降级 WASM）
+  let device = chooseDevice();
+  if (device === 'webgpu' && !supportsWebGPU()) {
+    device = 'wasm';
+    deviceSelect.value = 'wasm';
   }
+  const deviceLabel = device === 'webgpu' ? 'WebGPU' : 'WASM 单线程';
   modelStatus.textContent = '加载中…';
   modelStatus.className = 'status-pill status-loading';
   loadModelBtn.disabled = true;
   startBtn.disabled = true;
   setModelProgress(0);
-  setStatus(`正在加载深度模型（${device === 'webgpu' ? 'WebGPU' : 'WASM'}），首次加载约需 5–20 秒…`);
+  setStatus(`正在加载深度模型（${deviceLabel}），首次加载约需 5–20 秒…`);
   startIndeterminateProgress();
   try {
     await depth.loadModel(device, onModelProgress);
     stopIndeterminateProgress();
     setModelProgress(100);
-    modelStatus.textContent = device === 'webgpu' ? '已加载（WebGPU）' : '已加载（WASM）';
+    modelStatus.textContent = '已加载（' + deviceLabel + '）';
     modelStatus.className = 'status-pill status-ok';
     updateStartEnabled();
     setStatus('模型已就绪，可开始转换。');
   } catch (e) {
     stopIndeterminateProgress();
     console.error('模型加载失败：', e);
+    // WebGPU 失败时自动降级 WASM（单线程，任何浏览器都能跑）
     if (device === 'webgpu') {
       setStatus('WebGPU 加载失败，自动改用 WASM…');
+      device = 'wasm';
+      deviceSelect.value = 'wasm';
       startIndeterminateProgress();
       try {
-        deviceSelect.value = 'wasm';
         await depth.loadModel('wasm', onModelProgress);
         stopIndeterminateProgress();
         setModelProgress(100);
@@ -232,7 +252,7 @@ loadModelBtn.addEventListener('click', async () => {
     modelStatus.className = 'status-pill status-error';
     const msg = '模型加载失败：' + (e.message || String(e));
     setStatus(msg);
-    alert(msg + '\n\n常见原因：\n1. 浏览器不是 Chrome/Edge；\n2. 安全头缺失导致 WASM 多线程无法启动；\n3. 模型文件缺失。请按 F12 查看控制台详细报错。');
+    alert(msg + '\n\n排查建议：\n1. 确认网络能访问 GitHub 上的模型文件（首次需下载约 100MB）；\n2. 刷新页面后重试；\n3. 手机上任意浏览器均可使用（自动跑 WASM 单线程），无需 Chrome/Edge 桌面版。');
     loadModelBtn.disabled = false;
   }
 });

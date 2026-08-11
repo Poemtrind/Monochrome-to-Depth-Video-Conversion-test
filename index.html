@@ -57,7 +57,7 @@
       </div>
 
       <!-- 输出宽度 / 输出高度 / 锁定宽高比 -->
-      <div class="form-row cols-3 mobile-hide">
+      <div class="form-row cols-3">
         <div class="field">
           <label for="outWidth">输出宽度</label>
           <input type="number" id="outWidth" value="1080" min="64" max="4096" />
@@ -75,7 +75,7 @@
       </div>
 
       <!-- 开始时间 / 结束时间 / 确定 -->
-      <div class="form-row cols-3 mobile-hide">
+      <div class="form-row cols-3">
         <div class="field">
           <label for="startTime">开始时间 (秒)</label>
           <input type="number" id="startTime" value="0" min="0" step="0.1" />
@@ -91,14 +91,20 @@
       </div>
 
       <!-- 叠加原图轮廓 / 深浅方向 -->
-      <div class="form-row options-row">
-        <label class="checkbox-line">
+      <div class="options-grid">
+        <label class="option-card">
           <input type="checkbox" id="overlayEdges" />
-          叠加原图轮廓（在深度图上描一层原视频线条，更易看清动作主体）
+          <span class="option-text">
+            <span class="option-title">叠加原图轮廓</span>
+            <span class="option-desc">在深度图上描一层原视频线条，更易看清动作主体</span>
+          </span>
         </label>
-        <label class="checkbox-line">
+        <label class="option-card">
           <input type="checkbox" id="invertDepth" />
-          深浅方向：远 = 亮（默认近 = 亮）
+          <span class="option-text">
+            <span class="option-title">深浅方向</span>
+            <span class="option-desc">远 = 亮（默认近 = 亮）</span>
+          </span>
         </label>
       </div>
     </section>
