@@ -16,26 +16,16 @@ if not exist "%NODE%" (
   set "NODE=node"
 )
 
-echo ================================================
-echo   THIRD3 本地启动器
-echo ================================================
+echo ========================================
+echo  THIRD3 本地服务器启动中...
+echo  启动后浏览器会自动打开 http://localhost:8777
+echo  本窗口请保持打开；关闭它即可停止服务器
+echo ========================================
 echo.
-echo   正在后台启动本地服务器...
-echo   （会弹出一个小黑窗口，那就是服务器）
-echo.
 
-REM 后台最小化启动服务器，并把日志写入 server.log 方便排查
-start "" /MIN "%NODE%" "%~dp0server.js" > "%~dp0server.log" 2>&1
-
-echo   等待服务器就绪（约 3 秒）...
-ping -n 4 127.0.0.1 >nul 2>&1
-
-echo   打开浏览器...
-start "" "http://localhost:8777"
+REM 前台直接运行 node（窗口保持打开，出错也能看到）；server.js 会在就绪后自动打开浏览器
+"%NODE%" "%~dp0server.js"
 
 echo.
-echo   完成！浏览器应已打开本应用。
-echo   不用时：关闭那个小黑窗口（或本窗口）即可停止服务器。
-echo   （万一打不开，请看同目录 server.log 里的报错）
-timeout /t 5 /nobreak >nul 2>&1
-exit
+echo 服务器已停止。按任意键关闭本窗口。
+pause >nul
