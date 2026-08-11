@@ -3,27 +3,21 @@
  * THIRD3 本地启动服务器（零依赖，只用 Node.js 内置模块）
  *
  * 作用：
- *  - 把本文件夹作为静态站点托管在 http://localhost:8080
+ *  - 把本文件夹作为静态站点托管在 http://localhost:8777
  *  - 设置 COOP/COEP 响应头，使浏览器进入「跨源隔离」状态，
  *    从而启用 WASM 多线程（SharedArrayBuffer），深度推理更快
  *  - 模型从本地硬盘读取，省去从 GitHub 远程下载约 100MB 的时间
  *
- * 用法：
- *  1. 安装 Node.js（https://nodejs.org，LTS 版即可）
- *  2. 双击 start.bat（Windows），或在终端运行 `node server.js`
- *  3. 浏览器自动打开 http://localhost:8080
- *  4. 点「加载深度模型」即可（首次从本地硬盘载入，很快）
- *
- * 停止：在终端按 Ctrl + C
+ * 注意：浏览器由 start.bat 负责打开，本文件不负责（避免 node 内嵌 start 引号失效）。
+ * 停止：直接关闭 start.bat 弹出的那个小黑窗口即可。
  */
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
 
 const ROOT = __dirname;
-const PORT = 8080;
+const PORT = parseInt(process.env.PORT, 10) || 8777;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -39,62 +33,54 @@ const MIME = {
   '.jpeg': 'image/jpeg',
   '.svg':  'image/svg+xml',
   '.map':  'application/json',
+  '.mp4':  'video/mp4',
 };
 
-const server = http.createServer((req, res) => {
-  // 关键：启用跨源隔离，允许 WASM 多线程（SharedArrayBuffer）
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-
-  let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
-  if (urlPath === '/') urlPath = '/index.html';
-
-  const filePath = path.normalize(path.join(ROOT, urlPath));
-  // 防目录穿越
-  if (filePath !== ROOT && !filePath.startsWith(ROOT + path.sep)) {
-    res.writeHead(403);
-    res.end('Forbidden');
-    return;
-  }
-
+function serveFile(req, res, filePath) {
   fs.stat(filePath, (err, stat) => {
     if (err || !stat.isFile()) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('404 Not Found: ' + urlPath);
+      res.end('404 Not Found: ' + filePath);
       return;
     }
     const ext = path.extname(filePath).toLowerCase();
-    res.setHeader('Content-Type', MIME[ext] || 'application/octet-stream');
-    fs.createReadStream(filePath).pipe(res);
-  });
-});
-
-function tryListen(port) {
-  server.once('error', (e) => {
-    if (e.code === 'EADDRINUSE') {
-      console.log(`端口 ${port} 已被占用，尝试 ${port + 1} ...`);
-      tryListen(port + 1);
-    } else {
-      console.error(e);
-      process.exit(1);
-    }
-  });
-  server.listen(port, () => {
-    const url = `http://localhost:${port}`;
-    console.log('========================================');
-    console.log(' 深度视频转换（本地版）已启动');
-    console.log(' 地址：' + url);
-    console.log(' 按 Ctrl + C 停止');
-    console.log('========================================');
-    // 尝试自动打开浏览器
-    const cmd = process.platform === 'win32'
-      ? 'start ""'
-      : (process.platform === 'darwin' ? 'open' : 'xdg-open');
-    exec(`${cmd} ${url}`, (e) => {
-      if (e) console.log('（未能自动打开浏览器，请手动访问 ' + url + '）');
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Content-Length': stat.size,
+      // 跨源隔离：开启 SharedArrayBuffer，让 ONNX Runtime Web 多线程 WASM 可用
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'Cross-Origin-Resource-Policy': 'cross-origin',
     });
+    fs.createReadStream(filePath).pipe(res);
   });
 }
 
-tryListen(PORT);
+const server = http.createServer((req, res) => {
+  let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  if (urlPath === '/') urlPath = '/index.html';
+  // 防止目录穿越
+  const safePath = path.normalize(urlPath).replace(/^(\.\.\/?)+/, '');
+  const filePath = path.join(ROOT, safePath);
+  if (!filePath.startsWith(ROOT)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Forbidden');
+    return;
+  }
+  serveFile(req, res, filePath);
+});
+
+server.listen(PORT, () => {
+  const url = `http://localhost:${PORT}`;
+  console.log('========================================');
+  console.log(' 深度视频转换（本地版）已启动');
+  console.log(' 地址：' + url);
+  console.log(' 请在浏览器打开上面的地址（不要自己输其他端口）');
+  console.log(' 不用时：直接关闭 start.bat 弹出的小黑窗口即可停止');
+  console.log('========================================');
+});
+
+process.on('SIGINT', () => {
+  console.log('收到中断信号，服务器退出。');
+  process.exit(0);
+});

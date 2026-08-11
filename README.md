@@ -21,14 +21,14 @@ https://poemtrind.github.io/Monochrome-to-Depth-Video-Conversion-test/
 前置：安装 [Node.js](https://nodejs.org)（LTS 版即可，无需手动安装其他依赖）。
 
 启动方式（任选其一）：
-1. 双击 `start.bat`（Windows 自动起服务并打开浏览器，默认端口 8080；若 8080 被占用会自动换到 8081、8082……请以弹窗里显示的地址为准）；
-2. 或在项目目录的终端里运行 `node server.js`，再浏览器打开弹窗里显示的地址（如 http://localhost:8080 ，被占用时可能是 http://localhost:8081 等）。
+1. 双击 `start.bat`（Windows 自动起服务并打开浏览器，地址固定为 http://localhost:8777 ；**请在浏览器输入这个地址，不要自己改端口**）；
+2. 或在项目目录的终端里运行 `node server.js`，再浏览器打开 http://localhost:8777 。
 
-> 若没有 Node.js，也可以改用 Python：`python -m http.server 8080`，
-> 然后浏览器打开 http://localhost:8080
+> 若没有 Node.js，也可以改用 Python：`python -m http.server 8777`，
+> 然后浏览器打开 http://localhost:8777
 > （此方式没有跨源隔离头，WASM 为单线程，速度略慢，但仍可用）。
 
-停止：在终端按 `Ctrl + C`。
+停止：关闭 `start.bat` 弹出的那个小黑窗口（或本窗口）即可。
 
 ## 使用步骤
 
