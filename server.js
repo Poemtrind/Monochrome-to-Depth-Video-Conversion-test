@@ -70,18 +70,31 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => {
-  const url = `http://localhost:${PORT}`;
-  console.log('========================================');
-  console.log(' 深度视频转换（本地版）已启动');
-  console.log(' 地址：' + url);
-  console.log(' 按 Ctrl + C 停止');
-  console.log('========================================');
-  // 尝试自动打开浏览器
-  const cmd = process.platform === 'win32'
-    ? 'start ""'
-    : (process.platform === 'darwin' ? 'open' : 'xdg-open');
-  exec(`${cmd} ${url}`, (e) => {
-    if (e) console.log('（未能自动打开浏览器，请手动访问 ' + url + '）');
+function tryListen(port) {
+  server.once('error', (e) => {
+    if (e.code === 'EADDRINUSE') {
+      console.log(`端口 ${port} 已被占用，尝试 ${port + 1} ...`);
+      tryListen(port + 1);
+    } else {
+      console.error(e);
+      process.exit(1);
+    }
   });
-});
+  server.listen(port, () => {
+    const url = `http://localhost:${port}`;
+    console.log('========================================');
+    console.log(' 深度视频转换（本地版）已启动');
+    console.log(' 地址：' + url);
+    console.log(' 按 Ctrl + C 停止');
+    console.log('========================================');
+    // 尝试自动打开浏览器
+    const cmd = process.platform === 'win32'
+      ? 'start ""'
+      : (process.platform === 'darwin' ? 'open' : 'xdg-open');
+    exec(`${cmd} ${url}`, (e) => {
+      if (e) console.log('（未能自动打开浏览器，请手动访问 ' + url + '）');
+    });
+  });
+}
+
+tryListen(PORT);
