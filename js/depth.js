@@ -22,7 +22,8 @@ async function ensureTF() {
   const { env } = tfModule;
   try { env.allowRemoteModels = false; } catch (e) {}
   try { env.allowLocalModels = true; } catch (e) {}
-  try { env.useBrowserCache = false; } catch (e) {}
+  // 允许浏览器缓存模型，避免每次刷新都重新下载约 100MB
+  try { env.useBrowserCache = true; } catch (e) {}
   try { env.wasm.wasmPaths = ortBase; } catch (e) {}
   try {
     if (env.backends && env.backends.onnx && env.backends.onnx.wasm) {

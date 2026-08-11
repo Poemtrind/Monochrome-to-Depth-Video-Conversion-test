@@ -130,12 +130,18 @@ fileInput.addEventListener('change', async () => {
     videoInfo = await video.loadVideo(file);
     startTime.value = '0';
     endTime.value = videoInfo.duration.toFixed(1);
-    // 默认输出尺寸：按视频比例缩放到 1080×1920 的框内，画面不变形
-    const boxW = 1080, boxH = 1920;
+    // 默认输出尺寸：按视频比例缩放，画面不变形。
+    // 手机端最大 720p，避免单线程 WASM + ffmpeg 编码把主线程卡死；桌面端最大 1080p。
+    const isMobile = isMobileView();
+    const boxW = isMobile ? 720 : 1080;
+    const boxH = isMobile ? 1280 : 1920;
     let w = videoInfo.width, h = videoInfo.height;
     const scale = Math.min(boxW / w, boxH / h, 1);
     w = Math.round(w * scale);
     h = Math.round(h * scale);
+    // 保证偶数（编码器更稳）
+    w = w - (w % 2);
+    h = h - (h % 2);
     outWidth.value = w;
     outHeight.value = h;
     segment = { start: 0, end: videoInfo.duration };
@@ -178,13 +184,18 @@ confirmTimeBtn.addEventListener('click', () => {
 
 // ---------- 加载模型 ----------
 let modelProgressTimer = null;
+let modelProgressStarted = false;
 function startIndeterminateProgress() {
   let v = 0;
+  modelProgressStarted = false;
   if (modelProgressTimer) clearInterval(modelProgressTimer);
   modelProgressTimer = setInterval(() => {
-    if (v < 90) v += (90 - v) * 0.03 + 0.5;
-    setModelProgress(Math.min(v, 92));
-  }, 300);
+    // 在收到真实进度前只缓慢爬到 35%，避免"先跳到 92% 再被拉回来"的乱跳感
+    if (!modelProgressStarted) {
+      if (v < 30) v += 0.8;
+      setModelProgress(Math.min(v, 30));
+    }
+  }, 200);
 }
 function stopIndeterminateProgress() {
   if (modelProgressTimer) { clearInterval(modelProgressTimer); modelProgressTimer = null; }
@@ -192,10 +203,13 @@ function stopIndeterminateProgress() {
 
 function onModelProgress(p) {
   if (!p) return;
-  if (p.status === 'progress' && p.total) {
+  // 只要收到任何真实进度信号，就停止不确定动画并显示真实值
+  if (p.status === 'progress' && p.total && p.total > 0) {
+    modelProgressStarted = true;
     stopIndeterminateProgress();
     setModelProgress((p.loaded / p.total) * 100);
-  } else if (p.status === 'done') {
+  } else if (p.status === 'done' || p.status === 'ready') {
+    modelProgressStarted = true;
     stopIndeterminateProgress();
     setModelProgress(100);
   }
@@ -296,8 +310,21 @@ async function startConversion() {
     }
   }
 
-  const width = parseInt(outWidth.value, 10) || videoInfo.width;
-  const height = parseInt(outHeight.value, 10) || videoInfo.height;
+  let width = parseInt(outWidth.value, 10) || videoInfo.width;
+  let height = parseInt(outHeight.value, 10) || videoInfo.height;
+  // 手机端强制限制分辨率上限，避免卡死；桌面端也限制在合理范围
+  const isMobile = isMobileView();
+  const maxW = isMobile ? 720 : 1080;
+  const maxH = isMobile ? 1280 : 1920;
+  const scale = Math.min(maxW / width, maxH / height, 1);
+  if (scale < 1) {
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+  width = width - (width % 2);
+  height = height - (height % 2);
+  outWidth.value = width;
+  outHeight.value = height;
   const fps = clampFps();
   // 直接读取开始/结束输入框（而非依赖“确定”按钮设置的 segment），
   // 这样即使没点“确定”，转换也会严格按界面上显示的时间片段进行。
@@ -334,13 +361,22 @@ async function startConversion() {
   }
 
   let done = 0;
+  const yieldEvery = isMobileView() ? 1 : 3; // 手机每帧都让出，桌面每 3 帧让出
   try {
     for (let i = 0; i < totalFrames; i++) {
       if (cancelled) break;
       const t = start + i / fps;
       await video.seekTo(videoInfo.video, t);
-      srcCtx.drawImage(videoInfo.video, 0, 0, width, height);
-      const srcImage = srcCtx.getImageData(0, 0, width, height);
+
+      // 抽帧：如果抽到黑帧，最多再 seek 一次重试
+      let srcImage = null;
+      for (let retry = 0; retry < 2; retry++) {
+        srcCtx.drawImage(videoInfo.video, 0, 0, width, height);
+        srcImage = srcCtx.getImageData(0, 0, width, height);
+        if (!video.isMostlyBlack(srcImage, 8) || retry === 1) break;
+        await new Promise((r) => setTimeout(r, 50));
+        await video.seekTo(videoInfo.video, t + 0.001);
+      }
       origCtx.putImageData(srcImage, 0, 0);
 
       const depthImage = await depth.estimateDepth(srcImage, invert);
@@ -350,14 +386,18 @@ async function startConversion() {
       }
       depthCtx.putImageData(depthImage, 0, 0);
 
-      encoder.encodeFrame(enc, depthCanvas, i, fps, i % (fps * 2) === 0);
+      // 必须 await，否则帧会乱序/丢失，导致 MP4 损坏
+      await encoder.encodeFrame(enc, depthCanvas, i, fps);
 
       done++;
       setConvProgress((done / totalFrames) * 100);
       if (i % 3 === 0 || i === totalFrames - 1) {
         setStatus(`正在处理第 ${done} / ${totalFrames} 帧`);
       }
-      await new Promise((r) => setTimeout(r, 0));
+      // 让出主线程，保证 UI（进度条、取消按钮）能响应，手机端尤为重要
+      if (i % yieldEvery === 0) {
+        await new Promise((r) => setTimeout(r, isMobileView() ? 5 : 1));
+      }
     }
   } catch (e) {
     save.resetPending();

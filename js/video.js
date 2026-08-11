@@ -28,24 +28,58 @@ export function loadVideo(file) {
 }
 
 /**
- * 把播放头跳到指定时间，返回 seeked 后的 Promise。
+ * 把播放头跳到指定时间，并确保真正解码出一帧后再返回。
+ * 手机浏览器常常在 seeked 事件触发时画面还是黑的，必须等 requestVideoFrameCallback
+ * 或额外延时，drawImage 才能拿到有效帧。
  */
 export function seekTo(video, t) {
   return new Promise((resolve) => {
-    const onSeeked = () => {
-      video.removeEventListener('seeked', onSeeked);
+    const clamped = Math.min(Math.max(t, 0), video.duration - 0.001);
+    if (Math.abs(video.currentTime - clamped) < 1e-4 && video.readyState >= 2) {
+      resolve();
+      return;
+    }
+
+    let resolved = false;
+    const doResolve = () => {
+      if (resolved) return;
+      resolved = true;
       resolve();
     };
+
+    const onSeeked = () => {
+      video.removeEventListener('seeked', onSeeked);
+      // seeked 只代表播放头到了，不代表画面已解码。等一帧真正渲染出来。
+      if ('requestVideoFrameCallback' in video) {
+        const handle = video.requestVideoFrameCallback(() => {
+          try { video.cancelVideoFrameCallback(handle); } catch (_) {}
+          doResolve();
+        });
+        // 保险：最多等 300ms
+        setTimeout(doResolve, 300);
+      } else {
+        // 老浏览器 Fallback：等一小段时间让解码器出图
+        setTimeout(doResolve, 80);
+      }
+    };
+
     video.addEventListener('seeked', onSeeked);
-    // 夹在合法范围内，避免超出时长导致无法触发 seeked
-    const clamped = Math.min(Math.max(t, 0), video.duration - 0.001);
-    if (Math.abs(video.currentTime - clamped) < 1e-4) {
-      // 已经在该位置，直接 resolve
-      resolve();
-    } else {
-      video.currentTime = clamped;
-    }
+    video.currentTime = clamped;
   });
+}
+
+/**
+ * 辅助：判断 ImageData 是否基本全黑（用于检测抽帧失败）。
+ */
+export function isMostlyBlack(imageData, threshold = 8) {
+  const d = imageData.data;
+  let dark = 0, total = d.length / 4;
+  if (total <= 0) return true;
+  for (let i = 0; i < d.length; i += 4) {
+    const avg = (d[i] + d[i + 1] + d[i + 2]) / 3;
+    if (avg < threshold) dark++;
+  }
+  return dark / total > 0.95;
 }
 
 /**
