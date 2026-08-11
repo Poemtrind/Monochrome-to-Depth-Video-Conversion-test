@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>黑白深度视频动作提取器</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "transformers": "./libs/transformers.web.min.js",
+      "@huggingface/transformers": "./libs/transformers.web.min.js",
+      "@ffmpeg/ffmpeg": "./libs/ffmpeg/ffmpeg/index.js",
+      "@ffmpeg/util": "./libs/ffmpeg/util/index.js"
+    }
+  }
+  </script>
+  </script>
+</head>
+<body>
+  <header class="app-header">
+    <h1>黑白深度视频动作提取器</h1>
+    <p class="subtitle">本地浏览器离线运行 · 视频不上传 · 逐帧算黑白深度再拼回 mp4</p>
+  </header>
+
+  <main class="container">
+    <!-- ① 选择视频与参数 -->
+    <section class="card">
+      <div class="card-title"><span class="badge">1</span> 选择视频与参数</div>
+
+      <!-- 源视频文件 -->
+      <div class="form-row">
+        <div class="field full">
+          <label>源视频文件</label>
+          <div class="file-row">
+            <input type="file" id="fileInput" accept="video/*" hidden />
+            <button id="fileSelectBtn" class="btn btn-secondary" type="button">选择视频文件</button>
+            <span id="fileName" class="file-name">未选择文件</span>
+          </div>
+          <p class="hint">转换后的黑白深度 mp4 将保存到你指定的目录。</p>
+        </div>
+      </div>
+
+      <!-- 推理设备 / 采样帧率 -->
+      <div class="form-row cols-2 mobile-hide">
+        <div class="field">
+          <label for="deviceSelect">推理设备</label>
+          <select id="deviceSelect">
+            <option value="webgpu">WebGPU（更快）</option>
+            <option value="wasm">WASM（兼容好）</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="fpsInput">采样帧率 (fps)</label>
+          <input type="number" id="fpsInput" value="30" min="1" max="60" />
+        </div>
+      </div>
+
+      <!-- 输出宽度 / 输出高度 / 锁定宽高比 -->
+      <div class="form-row cols-3 mobile-hide">
+        <div class="field">
+          <label for="outWidth">输出宽度</label>
+          <input type="number" id="outWidth" value="1080" min="64" max="4096" />
+        </div>
+        <div class="field">
+          <label for="outHeight">输出高度</label>
+          <input type="number" id="outHeight" value="1920" min="64" max="4096" />
+        </div>
+        <div class="field checkbox-field">
+          <label class="checkbox-line">
+            <input type="checkbox" id="lockRatio" checked />
+            锁定宽高比（改一边另一边自动联动，画面不变形）
+          </label>
+        </div>
+      </div>
+
+      <!-- 开始时间 / 结束时间 / 确定 -->
+      <div class="form-row cols-3 mobile-hide">
+        <div class="field">
+          <label for="startTime">开始时间 (秒)</label>
+          <input type="number" id="startTime" value="0" min="0" step="0.1" />
+        </div>
+        <div class="field">
+          <label for="endTime">结束时间 (秒)</label>
+          <input type="number" id="endTime" value="0" min="0" step="0.1" />
+        </div>
+        <div class="field action-field">
+          <span class="label-placeholder" aria-hidden="true"></span>
+          <button id="confirmTimeBtn" class="btn btn-primary" type="button" title="只处理片段，不用转完整视频。">确定</button>
+        </div>
+      </div>
+
+      <!-- 叠加原图轮廓 / 深浅方向 -->
+      <div class="form-row options-row">
+        <label class="checkbox-line">
+          <input type="checkbox" id="overlayEdges" />
+          叠加原图轮廓（在深度图上描一层原视频线条，更易看清动作主体）
+        </label>
+        <label class="checkbox-line">
+          <input type="checkbox" id="invertDepth" />
+          深浅方向：远 = 亮（默认近 = 亮）
+        </label>
+      </div>
+    </section>
+
+    <!-- ② 加载模型 -->
+    <section class="card">
+      <div class="card-title"><span class="badge">2</span> 加载模型</div>
+      <div class="form-row model-row">
+        <button id="loadModelBtn" class="btn btn-primary" type="button">加载深度模型</button>
+        <span id="modelStatus" class="status-pill status-idle">未加载</span>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-label">模型加载进度</div>
+        <div class="progress-track"><div id="modelProgressBar" class="progress-fill"></div></div>
+        <div id="modelProgressText" class="progress-text">0%</div>
+      </div>
+    </section>
+
+    <!-- ③ 转换 -->
+    <section class="card">
+      <div class="card-title"><span class="badge">3</span> 转换</div>
+      <div class="form-row convert-row">
+        <button id="startBtn" class="btn btn-primary" disabled>开始转换</button>
+        <button id="cancelBtn" class="btn btn-danger" disabled>取消</button>
+        <button id="saveDirBtn" class="btn btn-ghost mobile-hide" type="button">📁 选择保存目录</button>
+      </div>
+      <p class="hint mobile-hide">未选择保存目录时，转完走浏览器下载兜底。</p>
+      <div class="form-row mobile-hide">
+        <span class="status-pill status-idle" id="saveDirName">未选择（将提示下载）</span>
+      </div>
+      <div id="statusText" class="status-text">等待开始…</div>
+      <div class="progress-wrap">
+        <div class="progress-label">转换进度</div>
+        <div class="progress-track"><div id="convProgressBar" class="progress-fill"></div></div>
+        <div id="convProgressText" class="progress-text">0%</div>
+      </div>
+    </section>
+
+    <!-- ④ 预览与结果 -->
+    <section class="card">
+      <div class="card-title"><span class="badge">4</span> 预览与结果</div>
+      <div class="preview-row">
+        <div class="preview-box">
+          <div class="preview-label">原视频帧预览</div>
+          <canvas id="origCanvas" class="preview-canvas" width="640" height="360"></canvas>
+        </div>
+        <div class="preview-box">
+          <div class="preview-label">黑白深度（实时）</div>
+          <canvas id="depthCanvas" class="preview-canvas" width="640" height="360"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <footer class="app-footer">
+      <span id="deviceWarn"></span>
+      <span class="creator-credit">创作者：何欺</span>
+    </footer>
+  </main>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
