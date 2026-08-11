@@ -15,7 +15,6 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
 
 const ROOT = __dirname;
 const PORT = parseInt(process.env.PORT, 10) || 8777;
@@ -76,24 +75,9 @@ server.listen(PORT, () => {
   console.log('========================================');
   console.log(' 深度视频转换（本地版）已启动');
   console.log(' 地址：' + url);
-  console.log(' 浏览器将自动打开，若没打开请手动访问上面的地址');
+  console.log(' 请在浏览器打开上面的地址（不要自己输其他端口）');
   console.log(' 不用时：直接关闭本窗口即可停止服务器');
   console.log('========================================');
-
-  // 监听就绪后自动打开浏览器（延迟 1 秒确保页面可访问）
-  setTimeout(() => {
-    let opener;
-    if (process.platform === 'win32') {
-      opener = `cmd /c start "" "${url}"`;
-    } else if (process.platform === 'darwin') {
-      opener = `open "${url}"`;
-    } else {
-      opener = `xdg-open "${url}"`;
-    }
-    exec(opener, (err) => {
-      if (err) console.log('（自动打开浏览器失败，请手动访问 ' + url + '）');
-    });
-  }, 1000);
 });
 
 server.on('error', (err) => {
