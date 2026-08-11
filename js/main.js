@@ -103,10 +103,27 @@ function setConvProgress(pct) {
   convProgressBar.style.width = v + '%';
   convProgressText.textContent = v.toFixed(1) + '%';
 }
+// 让出主线程：先清空微任务，再用 requestAnimationFrame 确保浏览器完成一次重绘，
+// 这样即使下一帧的深度推理会短暂阻塞主线程，进度条和状态文字也先画出来，
+// 用户能看到“在处理中”而不是“卡死不动”。
+function yieldToUI() {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => resolve());
+      } else {
+        resolve();
+      }
+    }, 0);
+  });
+}
 function clampFps() {
   let f = parseInt(fpsInput.value, 10);
   if (!f || f < 1) f = 1;
   if (f > 60) f = 60;
+  // 手机端强制低帧率：单线程 WASM 推理很慢，高帧率会把主线程长时间占满，
+  // 表现为“进度不动、界面卡死”。限制到 10fps 可大幅减少总帧数。
+  if (isMobileView() && f > 10) f = 10;
   return f;
 }
 function updateStartEnabled() {
@@ -330,8 +347,8 @@ async function startConversion() {
   let height = parseInt(outHeight.value, 10) || videoInfo.height;
   // 手机端强制限制分辨率上限，避免卡死；桌面端也限制在合理范围
   const isMobile = isMobileView();
-  const maxW = isMobile ? 720 : 1080;
-  const maxH = isMobile ? 1280 : 1920;
+  const maxW = isMobile ? 480 : 1080;
+  const maxH = isMobile ? 854 : 1920;
   const scale = Math.min(maxW / width, maxH / height, 1);
   if (scale < 1) {
     width = Math.round(width * scale);
@@ -354,7 +371,11 @@ async function startConversion() {
   const start = segStart;
   const end = segEnd;
   const totalFrames = video.computeTotalFrames(start, end, fps);
-  setStatus(`片段：${start.toFixed(1)}s – ${end.toFixed(1)}s，共 ${(end - start).toFixed(1)}s，约 ${totalFrames} 帧`);
+  let segInfo = `片段：${start.toFixed(1)}s – ${end.toFixed(1)}s，共 ${(end - start).toFixed(1)}s，约 ${totalFrames} 帧`;
+  if (isMobile && totalFrames > 150) {
+    segInfo += '（手机端单线程较慢，建议用更短视频，或改用电脑本地版 start.bat 更快）';
+  }
+  setStatus(segInfo);
   const invert = invertDepthChk.checked;
   const overlay = overlayEdgesChk.checked;
 
@@ -377,11 +398,17 @@ async function startConversion() {
   }
 
   let done = 0;
-  const yieldEvery = isMobileView() ? 1 : 3; // 手机每帧都让出，桌面每 3 帧让出
   try {
     for (let i = 0; i < totalFrames; i++) {
       if (cancelled) break;
       const t = start + i / fps;
+
+      // 先进度条/状态更新并让浏览器真正重绘，再开始本帧的阻塞式推理，
+      // 这样用户能持续看到“在处理第几帧”，不会以为卡死不动。
+      setConvProgress((i / totalFrames) * 100);
+      setStatus(`正在处理第 ${i + 1} / ${totalFrames} 帧（${((i / totalFrames) * 100).toFixed(0)}%）`);
+      await yieldToUI();
+
       await video.seekTo(videoInfo.video, t);
 
       // 抽帧：如果抽到黑帧，最多再 seek 一次重试
@@ -407,13 +434,7 @@ async function startConversion() {
 
       done++;
       setConvProgress((done / totalFrames) * 100);
-      if (i % 3 === 0 || i === totalFrames - 1) {
-        setStatus(`正在处理第 ${done} / ${totalFrames} 帧`);
-      }
-      // 让出主线程，保证 UI（进度条、取消按钮）能响应，手机端尤为重要
-      if (i % yieldEvery === 0) {
-        await new Promise((r) => setTimeout(r, isMobileView() ? 5 : 1));
-      }
+      await yieldToUI();
     }
   } catch (e) {
     save.resetPending();
