@@ -183,6 +183,7 @@ confirmTimeBtn.addEventListener('click', () => {
 });
 
 // ---------- 加载模型 ----------
+const _fileProgress = new Map(); // 记录每个下载文件的进度，用于把多文件进度合并为整体进度
 let modelProgressTimer = null;
 let modelProgressStarted = false;
 function startIndeterminateProgress() {
@@ -202,16 +203,29 @@ function stopIndeterminateProgress() {
 }
 
 function onModelProgress(p) {
-  if (!p) return;
-  // 只要收到任何真实进度信号，就停止不确定动画并显示真实值
-  if (p.status === 'progress' && p.total && p.total > 0) {
+  if (!p || !p.file) return; // 没有文件信息的事件（如 init）先忽略
+  if (p.status === 'progress' && p.total) {
+    _fileProgress.set(p.file, { loaded: p.loaded || 0, total: p.total || 0 });
+  } else if (p.status === 'done') {
+    // 某文件下载完成：保留其已知大小，loaded 记为满
+    const cur = _fileProgress.get(p.file) || { total: 0 };
+    _fileProgress.set(p.file, { loaded: cur.total || 0, total: cur.total || 0 });
+  } else if (p.status === 'initiate' || p.status === 'download') {
+    if (!_fileProgress.has(p.file)) _fileProgress.set(p.file, { loaded: 0, total: 0 });
+  } else {
+    return;
+  }
+  // 重新汇总所有已下载文件的整体进度（这是单调递增的，不会跳回）
+  let loaded = 0, total = 0;
+  for (const s of _fileProgress.values()) {
+    loaded += s.loaded;
+    total += s.total;
+  }
+  if (total > 0) {
     modelProgressStarted = true;
     stopIndeterminateProgress();
-    setModelProgress((p.loaded / p.total) * 100);
-  } else if (p.status === 'done' || p.status === 'ready') {
-    modelProgressStarted = true;
-    stopIndeterminateProgress();
-    setModelProgress(100);
+    // 封顶 98%，剩余 2% 留给模型初始化（无进度事件），加载完成后再置 100
+    setModelProgress(Math.min(98, (loaded / total) * 100));
   }
 }
 
@@ -228,6 +242,7 @@ loadModelBtn.addEventListener('click', async () => {
   loadModelBtn.disabled = true;
   startBtn.disabled = true;
   setModelProgress(0);
+  _fileProgress.clear(); // 每次重新加载都清空上一次的文件进度记录
   setStatus(`正在加载深度模型（${deviceLabel}），首次加载约需 5–20 秒…`);
   startIndeterminateProgress();
   try {
@@ -246,6 +261,7 @@ loadModelBtn.addEventListener('click', async () => {
       setStatus('WebGPU 加载失败，自动改用 WASM…');
       device = 'wasm';
       deviceSelect.value = 'wasm';
+      _fileProgress.clear(); // 降级重新加载前清空，避免进度记录叠加上一次
       startIndeterminateProgress();
       try {
         await depth.loadModel('wasm', onModelProgress);
