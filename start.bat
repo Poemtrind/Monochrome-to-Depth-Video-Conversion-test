@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
 
-set "NODE=C:\Users\zhudengshan\.workbuddy\binaries\node\versions\22.22.2\node.exe"
+set "NODE=%USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2\node.exe"
 if not exist "%NODE%" (
   where node >nul 2>&1
   if errorlevel 1 (

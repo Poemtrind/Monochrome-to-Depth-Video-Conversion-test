@@ -1,5 +1,5 @@
 // 用 ffmpeg.wasm 把每帧 JPEG 直接封装成 mp4（本地浏览器内离线）
-// 借鉴 SECOND2（E:\SECOND2）验证过的做法：
+// 已验证的稳定做法：
 //   - 使用「单线程 core」：多线程版（core-mt）在合成 mp4 时会卡在 ~99%，单线程稳定；
 //   - 每帧以 JPEG 写入 ffmpeg 的 MEMFS，最后一次性 exec 用 libx264 封装成 mp4；
 //   - ffmpeg 用「动态 import」懒加载，绝不在模块顶层静态 import，避免拖垮 UI 绑定。

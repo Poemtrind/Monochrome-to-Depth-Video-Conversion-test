@@ -1,9 +1,9 @@
 // 深度模型加载与推理（Transformers.js + ONNX Runtime Web，本地离线）
-// 借鉴 SECOND2（E:\SECOND2）验证过的写法：
+// 已验证的稳定写法：
 //   - 用「动态 import('transformers')」懒加载，绝不在模块顶层静态 import，
 //     避免重库加载失败把整个页面的按钮绑定一起拖垮；
 //   - env 配置逐项 try/catch，且 wasm 路径用绝对路径字符串；
-//   - 模型用绝对路径；ORT 版本与 transformers 版本已严格匹配（直接复用 SECOND2 的库）。
+//   - 模型用绝对路径；ORT 版本与 transformers 版本已严格匹配。
 
 let tfModule = null;
 let estimator = null;
@@ -72,7 +72,7 @@ export function disposeModel() {
 
 /**
  * 对一帧 RGBA 图像估计深度，返回灰度 ImageData（0=远，255=近）。
- * 兼容 SECOND2 验证过的返回格式：result.predicted_depth 为 Tensor，
+ * 模型返回格式：result.predicted_depth 为 Tensor，
  * 需要按 min/max 归一化到 0–255。
  * @param {ImageData} imageData 源帧（输出分辨率）
  * @param {boolean} invert 是否反转深浅（远=亮）
@@ -92,7 +92,7 @@ export async function estimateDepth(imageData, invert) {
   const raw = new RawImage(rgb, width, height, 3);
 
   const result = await estimator(raw);
-  // SECOND2 验证过的模型返回 predicted_depth；部分版本返回 depth
+  // 模型返回 predicted_depth；部分版本返回 depth
   const tensor = result.predicted_depth || result.depth;
   if (!tensor || !tensor.data) throw new Error('深度输出格式异常');
 
